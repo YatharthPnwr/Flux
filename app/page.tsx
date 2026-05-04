@@ -1,65 +1,87 @@
-import Image from "next/image";
+'use client'
+import { useRef } from 'react'
+import { WalletButton } from '@/components/WalletButton'
+import { SendWizard } from '@/components/SendWizard'
+import { RateComparison } from '@/components/RateComparison'
 
 export default function Home() {
+  const appRef = useRef<HTMLElement>(null)
+
+  function scrollToApp() {
+    appRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <>
+      {/* ── Navbar ── */}
+      <nav className="navbar">
+        <span className="logo">⚡ Flux</span>
+        <WalletButton />
+      </nav>
+
+      {/* ── Hero ── */}
+      <section className="hero" aria-label="Hero">
+        <div className="hero-bg" aria-hidden />
+        <div className="hero-content">
+          <div className="hero-badge">Powered by Jupiter + Solana</div>
+          <h1 className="hero-title">
+            Send USD to Europe.<br />
+            <span className="hero-accent">Beat Wise by 0.24%.</span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="hero-sub">
+            On-chain USDC → EURC swap via Jupiter, then straight to your EUR bank account.
+            Transparent fees. Verifiable on Solana Explorer.
           </p>
+
+          {/* Live teaser */}
+          <div className="hero-teaser" aria-label="Live rate preview">
+            <div className="teaser-label">Right now · $500 →</div>
+            <RateComparison amountUsdc={500} />
+          </div>
+
+          <button id="hero-cta" className="btn-primary hero-cta" onClick={scrollToApp}>
+            Send Money Now
+          </button>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Decorative orbs */}
+        <div className="orb orb-1" aria-hidden />
+        <div className="orb orb-2" aria-hidden />
+      </section>
+
+      {/* ── How it works ── */}
+      <section className="how" aria-label="How it works">
+        <h2 className="section-title">How it works</h2>
+        <div className="how-steps">
+          {[
+            { n: '01', title: 'Connect Wallet', desc: 'Link your Phantom or Solflare wallet holding USDC.' },
+            { n: '02', title: 'Swap on-chain', desc: 'Jupiter routes your USDC → EURC at the best on-chain rate.' },
+            { n: '03', title: 'Bank transfer', desc: 'MoonPay off-ramps your EURC to your EUR bank via SEPA.' },
+          ].map(s => (
+            <div key={s.n} className="how-step">
+              <span className="how-num">{s.n}</span>
+              <h3 className="how-title">{s.title}</h3>
+              <p className="how-desc">{s.desc}</p>
+            </div>
+          ))}
         </div>
-      </main>
-    </div>
-  );
+      </section>
+
+      {/* ── App (wizard) ── */}
+      <section className="app-section" ref={appRef} id="app" aria-label="Send money">
+        <h2 className="section-title">Start your transfer</h2>
+        <SendWizard />
+      </section>
+
+      {/* ── Footer ── */}
+      <footer className="footer">
+        <span>⚡ Flux · Built on Solana</span>
+        <span className="footer-links">
+          <a href="https://jup.ag" target="_blank" rel="noopener">Jupiter</a>
+          <a href="https://moonpay.com" target="_blank" rel="noopener">MoonPay</a>
+          <a href="https://github.com/YatharthPnwr/flux" target="_blank" rel="noopener">GitHub</a>
+        </span>
+      </footer>
+    </>
+  )
 }
