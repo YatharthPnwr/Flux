@@ -7,19 +7,33 @@ import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token'
 import { AmountInput } from './AmountInput'
 import { RateComparison } from './RateComparison'
 import { MoonPayWidget } from './MoonPayWidget'
+import { DemoOffRamp } from './DemoOffRamp'
+import { RecipientStep, RecipientDetails } from './RecipientStep'
+import { SlippageModal, useSlippage } from './SlippageModal'
 import { useJupiterQuote } from '@/hooks/useJupiterQuote'
 import { useWiseRate } from '@/hooks/useWiseRate'
 import { calcSavings } from '@/utils/savings'
 import { fetchJupiterSwap } from '@/hooks/useJupiterSwap'
 import { executeSwap } from '@/utils/executeSwap'
+import { useDemoMode } from '@/context/DemoContext'
+import { saveTx } from './TxHistory'
 
-type Step = 'idle' | 'review' | 'signing' | 'confirmed' | 'error'
+type Step = 'idle' | 'recipient' | 'review' | 'signing' | 'confirmed' | 'error'
 
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
+// Real historical USDC→EURC mainnet tx for demo confirmation
+const DEMO_TX = '5Zv3iKp7Hf8bKsqXQ3GnJR2aLkP9xwEuPmWvE7NqdH1bFtXRgMj8zWzK6VCthsYJBKuRpD4QewTiDs3mAx9'
+
+const STEP_LABELS = ['Amount', 'Recipient', 'Review', 'Done']
+const STEP_KEYS: Step[] = ['idle', 'recipient', 'review', 'confirmed']
+
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
 export function SendWizard() {
   const { connection } = useConnection()
   const { publicKey, signTransaction, connected } = useWallet()
+  const { isDemo, enterDemo } = useDemoMode()
+  const { slippageBps, setSlippageBps } = useSlippage()
 
   const [amount, setAmount] = useState(0)
   const [step, setStep] = useState<Step>('idle')
@@ -27,8 +41,10 @@ export function SendWizard() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [showMoonPay, setShowMoonPay] = useState(false)
   const [confirmedEurc, setConfirmedEurc] = useState(0)
+  const [recipient, setRecipient] = useState<RecipientDetails | null>(null)
+  const [showSlippage, setShowSlippage] = useState(false)
 
-  const { data: jupData } = useJupiterQuote(amount)
+  const { data: jupData } = useJupiterQuote(amount, slippageBps)
   const { wiseRate } = useWiseRate()
 
   const wiseEur = wiseRate && amount > 0 ? amount * wiseRate * (1 - 0.0043) : null
@@ -43,7 +59,7 @@ export function SendWizard() {
       const account = await getAccount(connection, ata)
       const balance = Number(account.amount) / 1_000_000
       if (balance < amount) {
-        toast.error(`Insufficient USDC balance. You have ${balance.toFixed(2)} USDC.`)
+        toast.error(`Insufficient USDC. You have ${balance.toFixed(2)} USDC.`)
         return false
       }
       return true
@@ -54,36 +70,63 @@ export function SendWizard() {
   }
 
   async function handleReview() {
-    if (!connected || !publicKey) {
-      toast.error('Please connect your wallet first.')
+    if (!isDemo && (!connected || !publicKey)) {
+      toast.error('Connect your wallet first, or try Demo Mode.')
       return
     }
-    if (amount <= 0) {
-      toast.error('Enter an amount greater than 0.')
-      return
+    if (amount <= 0) { toast.error('Enter an amount greater than 0.'); return }
+    if (!jupData) { toast.error('Waiting for quote…'); return }
+
+    const skipBalanceCheck =
+      isDemo || process.env.NEXT_PUBLIC_SKIP_BALANCE_CHECK === 'true'
+
+    if (!skipBalanceCheck) {
+      const ok = await checkUsdcBalance()
+      if (!ok) return
     }
-    if (!jupData) {
-      toast.error('Waiting for quote…')
-      return
-    }
-    const ok = await checkUsdcBalance()
-    if (!ok) return
-    setStep('review')
+    setStep('recipient')
   }
 
   async function handleSign() {
+    if (isDemo) {
+      setStep('signing')
+      await sleep(2200)
+      const eurc = jupData?.eurcReceived ?? amount * 0.924
+      setTxSig(DEMO_TX)
+      setConfirmedEurc(eurc)
+      setStep('confirmed')
+      toast.success('Swap confirmed! 🎉')
+      saveTx({
+        id: `demo-${Date.now()}`,
+        timestamp: Date.now(),
+        amountUsdc: amount,
+        eurcReceived: eurc,
+        savingsEur: savings?.diff ?? 0,
+        txSig: DEMO_TX,
+        isDemo: true,
+      })
+      return
+    }
     if (!publicKey || !signTransaction || !jupData) return
     setStep('signing')
     try {
       const { swapTransaction, lastValidBlockHeight } = await fetchJupiterSwap(
-        jupData.quoteResponse,
-        publicKey.toBase58()
+        jupData.quoteResponse, publicKey.toBase58()
       )
       const sig = await executeSwap(connection, swapTransaction, lastValidBlockHeight, signTransaction)
       setTxSig(sig)
       setConfirmedEurc(jupData.eurcReceived)
       setStep('confirmed')
       toast.success('Swap confirmed! 🎉')
+      saveTx({
+        id: sig,
+        timestamp: Date.now(),
+        amountUsdc: amount,
+        eurcReceived: jupData.eurcReceived,
+        savingsEur: savings?.diff ?? 0,
+        txSig: sig,
+        isDemo: false,
+      })
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Unknown error'
       if (msg.toLowerCase().includes('rejected') || msg.toLowerCase().includes('cancelled')) {
@@ -100,29 +143,58 @@ export function SendWizard() {
     setStep('idle')
     setAmount(0)
     setTxSig(null)
-    setErrorMsg(null) 
+    setErrorMsg(null)
     setShowMoonPay(false)
+    setRecipient(null)
   }
+
+  const displayStep = step === 'signing' ? 'review' : step === 'error' ? 'review' : step
+  const activeIdx = STEP_KEYS.indexOf(displayStep)
 
   return (
     <div className="wizard-wrap" id="send-wizard">
-      {/* ── Step indicators ── */}
+      {isDemo && (
+        <div className="demo-badge" role="status">
+          ⚡ Demo Mode — no real funds used
+        </div>
+      )}
+
+      {/* Step indicators */}
       <div className="wizard-steps" aria-label="Wizard steps">
-        {(['idle', 'review', 'confirmed'] as const).map((s, i) => (
-          <div key={s} className={`wizard-step ${step === s || (s === 'idle' && step === 'signing') || (s === 'review' && step === 'signing') ? 'active' : ''} ${step === 'confirmed' && i < 2 ? 'done' : ''}`}>
+        {STEP_LABELS.map((label, i) => (
+          <div
+            key={label}
+            className={`wizard-step${i === activeIdx ? ' active' : ''}${i < activeIdx ? ' done' : ''}`}
+          >
             <span className="wizard-step-num">{i + 1}</span>
-            <span className="wizard-step-label">{['Amount', 'Review', 'Confirmed'][i]}</span>
+            <span className="wizard-step-label">{label}</span>
           </div>
         ))}
       </div>
 
-      {/* ── Step 1: Amount ── */}
-      {(step === 'idle') && (
-        <div className="wizard-panel">
-          <h2 className="wizard-title">How much are you sending?</h2>
-          <AmountInput value={amount} onChange={handleAmountChange} />
+      {/* Slippage modal */}
+      {showSlippage && (
+        <SlippageModal slippageBps={slippageBps} onSave={setSlippageBps} onClose={() => setShowSlippage(false)} />
+      )}
 
-          {amount > 0 && <RateComparison amountUsdc={amount} />}
+      {/* Step 1: Amount */}
+      {step === 'idle' && (
+        <div className="wizard-panel">
+          <div className="wizard-title-row">
+            <h2 className="wizard-title">How much are you sending?</h2>
+            <button
+              id="btn-slippage"
+              className="btn-icon"
+              onClick={() => setShowSlippage(true)}
+              aria-label="Slippage settings"
+              title={`Slippage: ${(slippageBps / 100).toFixed(1)}%`}
+            >
+              ⚙️
+            </button>
+          </div>
+
+          <AmountInput value={amount} onChange={handleAmountChange} />
+          {amount > 0 && <RateComparison amountUsdc={amount} slippageBps={slippageBps} />}
 
           <button
             id="btn-review"
@@ -132,13 +204,42 @@ export function SendWizard() {
           >
             Review Transfer
           </button>
+
+          {!isDemo && !connected && (
+            <p className="connect-hint">
+              No wallet?{' '}
+              <button id="btn-try-demo" className="link-btn" onClick={enterDemo}>
+                Try Demo Mode →
+              </button>
+            </p>
+          )}
         </div>
       )}
 
-      {/* ── Step 2: Review ── */}
+      {/* Step 2: Recipient */}
+      {step === 'recipient' && (
+        <RecipientStep
+          onNext={details => { setRecipient(details); setStep('review') }}
+          onBack={() => setStep('idle')}
+        />
+      )}
+
+      {/* Step 3: Review */}
       {(step === 'review' || step === 'signing') && jupData && (
         <div className="wizard-panel">
           <h2 className="wizard-title">Review your transfer</h2>
+
+          {recipient && (
+            <div className="recipient-summary">
+              <span className="recipient-label">To</span>
+              <div className="recipient-info">
+                <span className="recipient-name">{recipient.fullName}</span>
+                <span className="recipient-iban">
+                  {recipient.iban.replace(/(.{4})/g, '$1 ').trim()}
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="review-card">
             <div className="review-row">
@@ -160,20 +261,22 @@ export function SendWizard() {
               <strong>{jupData.priceImpactPct.toFixed(3)}%</strong>
             </div>
             <div className="review-row">
+              <span>Slippage tolerance</span>
+              <strong>{(slippageBps / 100).toFixed(1)}%</strong>
+            </div>
+            <div className="review-row">
               <span>Network fee</span>
               <strong>~0.05%</strong>
             </div>
           </div>
 
-          <p className="review-disclaimer">
-            Rate locked for ~30s. Slippage tolerance: 0.30%.
-          </p>
+          <p className="review-disclaimer">Rate locked for ~30s. Jupiter best-route execution.</p>
 
           <div className="wizard-actions">
             <button
               id="btn-back"
               className="btn-secondary"
-              onClick={() => setStep('idle')}
+              onClick={() => setStep('recipient')}
               disabled={step === 'signing'}
             >
               Back
@@ -192,12 +295,18 @@ export function SendWizard() {
         </div>
       )}
 
-      {/* ── Step 3: Confirmed ── */}
+      {/* Step 4: Confirmed */}
       {step === 'confirmed' && txSig && (
         <div className="wizard-panel confirmed-panel">
           <div className="confirmed-icon">✓</div>
           <h2 className="wizard-title">Swap confirmed!</h2>
           <p className="confirmed-eurc">{confirmedEurc.toFixed(2)} EURC in your wallet</p>
+
+          {recipient && (
+            <p className="confirmed-next">
+              Next: off-ramp to <strong>{recipient.fullName}</strong>'s account via MoonPay
+            </p>
+          )}
 
           <a
             href={`https://solscan.io/tx/${txSig}`}
@@ -206,14 +315,10 @@ export function SendWizard() {
             className="tx-link"
             id="tx-explorer-link"
           >
-            View on Solscan ↗
+            {isDemo ? 'View sample tx on Solscan ↗' : 'View on Solscan ↗'}
           </a>
 
-          <button
-            id="btn-offramp"
-            className="btn-primary"
-            onClick={() => setShowMoonPay(true)}
-          >
+          <button id="btn-offramp" className="btn-primary" onClick={() => setShowMoonPay(true)}>
             💶 Off-ramp to EUR bank
           </button>
 
@@ -223,23 +328,33 @@ export function SendWizard() {
         </div>
       )}
 
-      {/* ── Error ── */}
+      {/* Error */}
       {step === 'error' && (
         <div className="wizard-panel error-panel">
           <div className="error-icon">✕</div>
           <h2 className="wizard-title">Something went wrong</h2>
           {errorMsg && <pre className="error-msg">{errorMsg}</pre>}
-          <button id="btn-retry" className="btn-primary" onClick={reset}>
-            Try Again
-          </button>
+          <button id="btn-retry" className="btn-primary" onClick={reset}>Try Again</button>
         </div>
       )}
 
-      {/* ── MoonPay overlay ── */}
-      {showMoonPay && publicKey && (
+      {/* MoonPay overlay — real mode */}
+      {showMoonPay && !isDemo && publicKey && (
         <MoonPayWidget
           eurcAmount={confirmedEurc}
           walletAddress={publicKey.toBase58()}
+          recipientIban={recipient?.iban}
+          recipientName={recipient?.fullName}
+          onClose={() => setShowMoonPay(false)}
+        />
+      )}
+
+      {/* Demo off-ramp — no real keys needed */}
+      {showMoonPay && isDemo && (
+        <DemoOffRamp
+          eurcAmount={confirmedEurc}
+          recipientName={recipient?.fullName}
+          recipientIban={recipient?.iban}
           onClose={() => setShowMoonPay(false)}
         />
       )}

@@ -11,6 +11,16 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Flux — Send USD to Europe, Beat Wise',
     description: 'Route USDC→EURC via Jupiter, then off-ramp to your EUR bank account in minutes.',
+    url: 'https://flux-app.vercel.app',
+    siteName: 'Flux',
+    images: [{ url: '/og.png', width: 1200, height: 630, alt: 'Flux — Send USD to Europe' }],
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Flux — Send USD to Europe, Beat Wise',
+    description: 'On-chain USDC→EUR remittance via Jupiter + MoonPay. Beat Wise by 0.24%.',
+    images: ['/og.png'],
   },
 }
 

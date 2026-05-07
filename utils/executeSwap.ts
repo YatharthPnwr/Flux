@@ -6,25 +6,33 @@ export async function executeSwap(
   lastValidBlockHeight: number,
   signTransaction: (tx: VersionedTransaction) => Promise<VersionedTransaction>
 ): Promise<string> {
-  // 1. Deserialize
   const txBuf = Buffer.from(swapTransaction, 'base64')
   const tx = VersionedTransaction.deserialize(txBuf)
 
-  // 2. Simulate
   const sim = await connection.simulateTransaction(tx, { replaceRecentBlockhash: true })
   if (sim.value.err) {
     const logs = sim.value.logs?.join('\n') ?? ''
     throw new Error(`Simulation failed: ${JSON.stringify(sim.value.err)}\n${logs}`)
   }
 
-  // 3. Sign (opens wallet popup)
   const signed = await signTransaction(tx)
+  const serialized = signed.serialize()
 
-  // 4. Send + confirm with lastValidBlockHeight
-  const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: true })
-  await connection.confirmTransaction(
-    { signature: sig, lastValidBlockHeight, blockhash: tx.message.recentBlockhash },
-    'confirmed'
-  )
-  return sig
+  // Retry send up to 3x if block height expires
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const sig = await connection.sendRawTransaction(serialized, { skipPreflight: true })
+    const { blockhash } = await connection.getLatestBlockhash('confirmed')
+    try {
+      await connection.confirmTransaction(
+        { signature: sig, lastValidBlockHeight, blockhash },
+        'confirmed'
+      )
+      return sig
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : ''
+      if (attempt < 2 && msg.includes('block height exceeded')) continue
+      throw e
+    }
+  }
+  throw new Error('Transaction failed after 3 attempts')
 }

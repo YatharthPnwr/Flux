@@ -4,25 +4,30 @@ import { useState, useEffect } from 'react'
 interface Props {
   eurcAmount: number
   walletAddress: string
+  recipientIban?: string
+  recipientName?: string
   onClose: () => void
 }
 
-export function MoonPayWidget({ eurcAmount, walletAddress, onClose }: Props) {
+export function MoonPayWidget({ eurcAmount, walletAddress, recipientIban, recipientName, onClose }: Props) {
   const [url, setUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     async function buildUrl() {
       try {
-        const params = new URLSearchParams({
+        const paramObj: Record<string, string> = {
           apiKey: process.env.NEXT_PUBLIC_MOONPAY_PK ?? '',
           baseCurrencyCode: 'eurc_sol',
           baseCurrencyAmount: eurcAmount.toFixed(6),
           quoteCurrencyCode: 'eur',
-          refundWalletAddress: walletAddress,
-          paymentMethod: 'bank_transfer',
-        })
-        const qs = params.toString()
+          walletAddress,
+          paymentMethod: 'sepa_bank_transfer',
+        }
+        if (recipientIban) paramObj.bankIban = recipientIban
+        if (recipientName) paramObj.bankAccountHolderName = recipientName
+
+        const qs = new URLSearchParams(paramObj).toString()
         const res = await fetch('/api/moonpay-sign', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -33,28 +38,26 @@ export function MoonPayWidget({ eurcAmount, walletAddress, onClose }: Props) {
           ? 'https://sell.moonpay.com'
           : 'https://sell-sandbox.moonpay.com'
         setUrl(`${base}/?${qs}&signature=${encodeURIComponent(signature)}`)
-      } catch (e) {
+      } catch {
         setError('Failed to open MoonPay. Please try again.')
       }
     }
     buildUrl()
-  }, [eurcAmount, walletAddress])
+  }, [eurcAmount, walletAddress, recipientIban, recipientName])
 
   return (
     <div className="moonpay-overlay" role="dialog" aria-label="MoonPay off-ramp">
       <div className="moonpay-modal">
         <div className="moonpay-header">
           <span>💶 Off-ramp to EUR</span>
-          <button onClick={onClose} className="moonpay-close" aria-label="Close">
-            ✕
-          </button>
+          <button onClick={onClose} className="moonpay-close" aria-label="Close">✕</button>
         </div>
 
         {error && (
           <div className="moonpay-error">
             <p>{error}</p>
             <p className="moonpay-fallback">
-              Manually send {eurcAmount.toFixed(2)} EURC to your bank via MoonPay at{' '}
+              Manually off-ramp {eurcAmount.toFixed(2)} EURC at{' '}
               <a href="https://sell-sandbox.moonpay.com" target="_blank" rel="noopener">
                 sell-sandbox.moonpay.com
               </a>

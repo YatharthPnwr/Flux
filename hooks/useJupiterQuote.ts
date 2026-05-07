@@ -11,13 +11,13 @@ export interface JupiterQuoteResult {
   quoteResponse: unknown
 }
 
-async function fetchJupiterQuote(amountUsdc: number): Promise<JupiterQuoteResult> {
+async function fetchJupiterQuote(amountUsdc: number, slippageBps: number): Promise<JupiterQuoteResult> {
   const atomicAmount = Math.round(amountUsdc * 1_000_000)
   const params = new URLSearchParams({
     inputMint: USDC_MINT,
     outputMint: EURC_MINT,
     amount: atomicAmount.toString(),
-    slippageBps: '30',
+    slippageBps: slippageBps.toString(),
     restrictIntermediateTokens: 'true',
   })
 
@@ -41,10 +41,10 @@ async function fetchJupiterQuote(amountUsdc: number): Promise<JupiterQuoteResult
   }
 }
 
-export function useJupiterQuote(amountUsdc: number) {
+export function useJupiterQuote(amountUsdc: number, slippageBps = 30) {
   const { data, error, isLoading } = useSWR(
-    amountUsdc > 0 ? ['jupiter-quote', amountUsdc] : null,
-    () => fetchJupiterQuote(amountUsdc),
+    amountUsdc > 0 ? ['jupiter-quote', amountUsdc, slippageBps] : null,
+    () => fetchJupiterQuote(amountUsdc, slippageBps),
     { refreshInterval: 15_000, revalidateOnFocus: false }
   )
   return { data, error, isLoading }

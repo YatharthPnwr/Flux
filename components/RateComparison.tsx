@@ -5,14 +5,15 @@ import { calcSavings } from '@/utils/savings'
 
 interface Props {
   amountUsdc: number
+  slippageBps?: number
 }
 
 function Skeleton() {
   return <span className="skeleton" aria-hidden />
 }
 
-export function RateComparison({ amountUsdc }: Props) {
-  const { data: jup, isLoading: jupLoading, error: jupErr } = useJupiterQuote(amountUsdc)
+export function RateComparison({ amountUsdc, slippageBps = 30 }: Props) {
+  const { data: jup, isLoading: jupLoading, error: jupErr } = useJupiterQuote(amountUsdc, slippageBps)
   const { wiseRate, isLoading: wiseLoading } = useWiseRate()
 
   const loading = jupLoading || wiseLoading
